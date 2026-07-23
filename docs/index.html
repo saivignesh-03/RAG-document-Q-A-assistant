@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Document Q&amp;A Assistant — signal chain</title>
+<meta name="description" content="A hybrid-retrieval, reranked, local-LLM RAG pipeline for answering questions about a document — grounded, not guessing.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B1220;
+    --bg-panel:#121B2E;
+    --bg-panel-2:#182238;
+    --text:#EDEAE0;
+    --text-muted:#7C8798;
+    --amber:#FFB000;
+    --teal:#4FD1C5;
+    --rule:rgba(255,255,255,0.08);
+    --rule-strong:rgba(255,255,255,0.18);
+    --display:'Big Shoulders Display', sans-serif;
+    --mono:'JetBrains Mono', monospace;
+    --body:'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--body);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--amber);}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px;}
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--teal);
+  }
+  h1,h2{
+    font-family:var(--display);
+    font-weight:800;
+    letter-spacing:0.01em;
+    margin:0;
+  }
+
+  /* ---------- HERO ---------- */
+  .hero{
+    position:relative;
+    padding:96px 0 72px;
+    overflow:hidden;
+    border-bottom:1px solid var(--rule);
+  }
+  .hero::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px),
+      radial-gradient(ellipse at 50% -10%, rgba(255,176,0,0.08), transparent 60%);
+    pointer-events:none;
+  }
+  .hero .wrap{position:relative;}
+  .hero h1{
+    font-size:56px;
+    line-height:1.05;
+    max-width:720px;
+    margin-top:14px;
+  }
+  .hero p.sub{
+    max-width:560px;
+    color:var(--text-muted);
+    font-size:17px;
+    margin:22px 0 36px;
+  }
+  .cta-row{display:flex;gap:14px;flex-wrap:wrap;}
+  .btn{
+    font-family:var(--mono);
+    font-size:13px;
+    letter-spacing:0.03em;
+    padding:12px 20px;
+    border-radius:2px;
+    text-decoration:none;
+    border:1px solid var(--rule-strong);
+    display:inline-block;
+  }
+  .btn.primary{background:var(--amber);color:#1a1200;border-color:var(--amber);font-weight:500;}
+  .btn.ghost{color:var(--text);}
+
+  /* signal chain strip */
+  .signal{
+    margin-top:64px;
+    position:relative;
+    height:110px;
+  }
+  .signal .track{
+    position:absolute;
+    top:52px;left:0;right:0;
+    height:1px;
+    background:repeating-linear-gradient(90deg, var(--rule-strong) 0 6px, transparent 6px 12px);
+  }
+  .signal .pulse{
+    position:absolute;
+    top:47px;
+    width:11px;height:11px;
+    border-radius:50%;
+    background:var(--amber);
+    box-shadow:0 0 10px 2px rgba(255,176,0,0.6);
+    animation:travel 6s linear infinite;
+  }
+  @keyframes travel{
+    0%{left:0%;}
+    100%{left:calc(100% - 11px);}
+  }
+  .signal .nodes{
+    position:relative;
+    display:flex;
+    justify-content:space-between;
+  }
+  .signal .node{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-muted);
+    text-align:center;
+    width:80px;
+  }
+  .signal .node .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--text-muted);
+    margin:0 auto 44px;
+    position:relative;
+    top:44px;
+  }
+  @media (prefers-reduced-motion: reduce){
+    .signal .pulse{animation:none;left:calc(50% - 6px);}
+  }
+
+  /* ---------- SECTIONS ---------- */
+  section{padding:64px 0;border-bottom:1px solid var(--rule);}
+  section h2{font-size:30px;margin-bottom:8px;}
+  section .lede{color:var(--text-muted);max-width:560px;margin-bottom:40px;font-size:15px;}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+  .card{
+    background:var(--bg-panel);
+    border:1px solid var(--rule);
+    padding:24px;
+  }
+  .card .tag{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:0.08em;text-transform:uppercase;}
+  .card h3{font-family:var(--body);font-weight:600;font-size:17px;margin:10px 0 8px;}
+  .card p{color:var(--text-muted);font-size:14px;margin:0;}
+
+  /* pipeline list */
+  .pipeline{border-top:1px solid var(--rule);margin-top:8px;}
+  .pipeline .step{
+    display:grid;
+    grid-template-columns:56px 200px 1fr;
+    gap:20px;
+    padding:16px 0;
+    border-bottom:1px solid var(--rule);
+    align-items:baseline;
+  }
+  .pipeline .num{font-family:var(--mono);color:var(--teal);font-size:13px;}
+  .pipeline .label{font-family:var(--mono);font-size:13px;color:var(--text);letter-spacing:0.02em;}
+  .pipeline .desc{color:var(--text-muted);font-size:14px;}
+
+  /* tech stack chips */
+  .stack-group{margin-bottom:24px;}
+  .stack-group .role{font-family:var(--mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .chip{
+    font-family:var(--mono);
+    font-size:12px;
+    padding:6px 12px;
+    border:1px solid var(--rule-strong);
+    color:var(--text);
+    background:var(--bg-panel-2);
+  }
+
+  /* build log */
+  .log-entry{
+    font-family:var(--mono);
+    font-size:13px;
+    padding:16px 18px;
+    background:var(--bg-panel);
+    border-left:2px solid var(--rule-strong);
+    margin-bottom:12px;
+  }
+  .log-entry .k{color:var(--amber);margin-right:10px;}
+  .log-entry.limitation .k{color:var(--teal);}
+  .log-entry p{margin:6px 0 0;color:var(--text-muted);font-family:var(--body);font-size:14px;}
+
+  footer{padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px;}
+  footer a{color:var(--text-muted);text-decoration:underline;}
+
+  @media (max-width:720px){
+    .hero h1{font-size:38px;}
+    .grid3{grid-template-columns:1fr;}
+    .pipeline .step{grid-template-columns:40px 1fr;}
+    .pipeline .desc{grid-column:2;}
+    .signal{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Project log &middot; signal 01</div>
+    <h1>Ask the document.<br>Get an honest answer.</h1>
+    <p class="sub">A retrieval-augmented Q&amp;A pipeline that mixes semantic and keyword search, reranks the results for accuracy, and answers using a local, free LLM — no API keys, and no hallucinated facts.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/saivignesh-03/RAG-document-Q-A-assistant">View the code on GitHub</a>
+      <a class="btn ghost" href="https://github.com/saivignesh-03/RAG-document-Q-A-assistant/blob/main/README.md">Read the full README</a>
+    </div>
+
+    <div class="signal" aria-hidden="true">
+      <div class="track"></div>
+      <div class="pulse"></div>
+      <div class="nodes">
+        <div class="node"><div class="dot"></div>PDF</div>
+        <div class="node"><div class="dot"></div>CHUNKS</div>
+        <div class="node"><div class="dot"></div>VECTORS</div>
+        <div class="node"><div class="dot"></div>BM25</div>
+        <div class="node"><div class="dot"></div>RRF</div>
+        <div class="node"><div class="dot"></div>RERANK</div>
+        <div class="node"><div class="dot"></div>LLM</div>
+        <div class="node"><div class="dot"></div>ANSWER</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What it does</h2>
+    <p class="lede">Three ideas make this more than a wrapper around an LLM prompt.</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="tag">01</div>
+        <h3>Hybrid retrieval</h3>
+        <p>Semantic search finds meaning, BM25 finds exact terms, and Reciprocal Rank Fusion combines both rankings — so a rare name and a vague concept are both findable.</p>
+      </div>
+      <div class="card">
+        <div class="tag">02</div>
+        <h3>Reranked for accuracy</h3>
+        <p>A cross-encoder reads the question and each candidate chunk together, catching relevance that comparing rank positions alone can't.</p>
+      </div>
+      <div class="card">
+        <div class="tag">03</div>
+        <h3>Grounded, not guessing</h3>
+        <p>Answers come only from retrieved context. If the document doesn't contain it, the assistant says so — instead of filling the gap from its own training.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The signal chain</h2>
+    <p class="lede">Every question travels through the same eight stages before an answer comes back.</p>
+    <div class="pipeline">
+      <div class="step"><div class="num">01</div><div class="label">PDF → CHUNKS</div><div class="desc">Document loaded and split into overlapping ~800-character chunks.</div></div>
+      <div class="step"><div class="num">02</div><div class="label">EMBEDDINGS</div><div class="desc">Each chunk converted into a 768-dimension vector, stored in ChromaDB.</div></div>
+      <div class="step"><div class="num">03</div><div class="label">SEMANTIC SEARCH</div><div class="desc">Top 10 chunks by cosine similarity to the question's vector.</div></div>
+      <div class="step"><div class="num">04</div><div class="label">KEYWORD SEARCH</div><div class="desc">Top 10 chunks by BM25, for exact terms embeddings can miss.</div></div>
+      <div class="step"><div class="num">05</div><div class="label">RRF FUSION</div><div class="desc">Both rankings merged by rank position — a shortlist of 5, no score-scale tuning needed.</div></div>
+      <div class="step"><div class="num">06</div><div class="label">RERANK</div><div class="desc">A cross-encoder re-scores the shortlist by reading question and chunk jointly — top 3.</div></div>
+      <div class="step"><div class="num">07</div><div class="label">GENERATION</div><div class="desc">Llama 3.1 answers using only the retrieved context, or declines if it's not enough.</div></div>
+      <div class="step"><div class="num">08</div><div class="label">DELIVERY</div><div class="desc">Served through a FastAPI backend and a Streamlit chat interface.</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Built with</h2>
+    <p class="lede">Entirely local, open models — no paid API keys anywhere in this project.</p>
+
+    <div class="stack-group">
+      <div class="role">LLM &amp; embeddings</div>
+      <div class="chips">
+        <span class="chip">Ollama</span>
+        <span class="chip">Llama 3.1</span>
+        <span class="chip">nomic-embed-text</span>
+      </div>
+    </div>
+    <div class="stack-group">
+      <div class="role">Retrieval</div>
+      <div class="chips">
+        <span class="chip">LangChain</span>
+        <span class="chip">ChromaDB</span>
+        <span class="chip">rank_bm25</span>
+        <span class="chip">sentence-transformers (cross-encoder)</span>
+      </div>
+    </div>
+    <div class="stack-group">
+      <div class="role">Backend &amp; frontend</div>
+      <div class="chips">
+        <span class="chip">FastAPI</span>
+        <span class="chip">Uvicorn</span>
+        <span class="chip">Streamlit</span>
+        <span class="chip">pypdf</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>From the build log</h2>
+    <p class="lede">A few real entries from actually building this — not a polished summary.</p>
+
+    <div class="log-entry">
+      <span class="k">[BUG]</span>keyword search always returned k results, even chunks with a score of exactly zero.
+      <p>Fixed by filtering out any chunk that didn't genuinely score above zero before ranking.</p>
+    </div>
+    <div class="log-entry limitation">
+      <span class="k">[LIMITATION]</span>two genuinely relevant chunks tied under RRF fusion.
+      <p>Not a bug — RRF only sees rank position, never the actual text. Solved by adding the cross-encoder reranker.</p>
+    </div>
+    <div class="log-entry">
+      <span class="k">[INCIDENT]</span><code>uvicorn --reload</code> spawned two processes that both tried to load the LLM onto the GPU at once.
+      <p>Crashed Ollama with a CUDA initialization error. Fixed by running without <code>--reload</code>.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Built as a hands-on, end-to-end RAG learning project.
+  &nbsp;·&nbsp;
+  <a href="https://github.com/saivignesh-03/RAG-document-Q-A-assistant">GitHub repository</a>
+</footer>
+
+</body>
+</html>

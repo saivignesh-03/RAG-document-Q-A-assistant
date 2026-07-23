@@ -1,0 +1,15 @@
+langchain
+langchain-community
+langchain-ollama
+langchain-text-splitters
+langchain-core
+chromadb
+rank_bm25
+sentence-transformers
+fastapi
+uvicorn
+streamlit
+requests
+pypdf
+jupyter
+ipykernel
